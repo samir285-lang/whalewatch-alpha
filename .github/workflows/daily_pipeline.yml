@@ -2,11 +2,14 @@ name: Daily Alpha Pipeline
 
 on:
   schedule:
-    - cron: '30 15 * * 1-5'   # 9:00 PM IST = 15:30 UTC, Mon-Fri only
-  workflow_dispatch:            # manual trigger anytime from GitHub UI
+    - cron: '15 16 * * 1-5'   # 9:45 PM IST = 16:15 UTC, Mon-Fri
+    - cron: '15 17 * * 1-5'   # retry 10:45 PM IST if needed
+    - cron: '15 18 * * 1-5'   # retry 11:45 PM IST if needed
+    - cron: '15 19 * * 1-5'   # retry 12:45 AM IST if needed
+  workflow_dispatch:            # manual trigger anytime
 
 permissions:
-  contents: write               # needed to commit CSV output back to repo
+  contents: write
 
 jobs:
   run-pipeline:
@@ -27,10 +30,26 @@ jobs:
       - name: Run daily alpha pipeline
         run: python -m src.pipeline.run_daily
 
+      - name: Check output quality
+        id: check_output
+        run: |
+          python - <<'EOF'
+          import pandas as pd, sys
+          try:
+              df = pd.read_csv("output/nifty_100_top15.csv")
+              if len(df) < 10:
+                  print("FAIL: Less than 10 stocks in output")
+                  sys.exit(1)
+              print(f"OK: {len(df)} stocks in Nifty 100 output")
+          except Exception as e:
+              print(f"FAIL: {e}")
+              sys.exit(1)
+          EOF
+
       - name: Commit and push output CSVs
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add output/
-          git diff --cached --quiet || git commit -m "Daily alpha update $(date +'%Y-%m-%d')"
+          git add -f output/
+          git diff --cached --quiet || git commit -m "Daily alpha update $(date +'%Y-%m-%d %H:%M IST')"
           git push
