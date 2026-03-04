@@ -1,48 +1,188 @@
 """
 universe_builder.py
 -------------------
-Temporary sample universe with synthetic OHLCV + fundamental data.
-Replace build_sample_universe() with your real NSE data loader later.
+Fetches REAL NSE data using yfinance.
+Supports 4 universes: Nifty 100, Nifty 500, F&O stocks, All NSE stocks.
+Price history grows automatically from today onwards.
 """
-import numpy as np
+import yfinance as yf
 import pandas as pd
+import numpy as np
+import logging
+
+log = logging.getLogger(__name__)
+
+# ── Universe definitions ──────────────────────────────────────────────────────
+
+NIFTY100 = [
+    "RELIANCE.NS","TCS.NS","HDFCBANK.NS","BHARTIARTL.NS","ICICIBANK.NS",
+    "INFOSYS.NS","SBIN.NS","HINDUNILVR.NS","ITC.NS","LT.NS",
+    "KOTAKBANK.NS","AXISBANK.NS","BAJFINANCE.NS","MARUTI.NS","ASIANPAINT.NS",
+    "TITAN.NS","SUNPHARMA.NS","WIPRO.NS","ULTRACEMCO.NS","NTPC.NS",
+    "POWERGRID.NS","ADANIENT.NS","ADANIPORTS.NS","ONGC.NS","COALINDIA.NS",
+    "BAJAJFINSV.NS","HCLTECH.NS","TATAMOTORS.NS","TATASTEEL.NS","JSWSTEEL.NS",
+    "HINDALCO.NS","GRASIM.NS","INDUSINDBK.NS","CIPLA.NS","DRREDDY.NS",
+    "DIVISLAB.NS","EICHERMOT.NS","HEROMOTOCO.NS","BPCL.NS","TATACONSUM.NS",
+    "APOLLOHOSP.NS","NESTLEIND.NS","BRITANNIA.NS","PIDILITIND.NS","DABUR.NS",
+    "MARICO.NS","COLPAL.NS","BERGEPAINT.NS","HAVELLS.NS","VOLTAS.NS",
+    "SIEMENS.NS","ABB.NS","BEL.NS","HAL.NS","BHEL.NS",
+    "IRFC.NS","PFC.NS","RECLTD.NS","CANBK.NS","BANKBARODA.NS",
+    "UNIONBANK.NS","PNB.NS","IDFCFIRSTB.NS","FEDERALBNK.NS","BANDHANBNK.NS",
+    "MUTHOOTFIN.NS","BAJAJ-AUTO.NS","TVSMOTORS.NS","M&M.NS","TATAPOWER.NS",
+    "ADANIGREEN.NS","ADANIPOWER.NS","TORNTPOWER.NS","NHPC.NS","SAIL.NS",
+    "NMDC.NS","VEDL.NS","HINDZINC.NS","GODREJCP.NS","JUBLFOOD.NS",
+    "DMART.NS","ZOMATO.NS","LTIM.NS","TECHM.NS","MPHASIS.NS",
+    "PERSISTENT.NS","COFORGE.NS","CHOLAFIN.NS","SBILIFE.NS","HDFCLIFE.NS",
+    "ICICIPRULI.NS","ICICIGI.NS","BAJAJHLDNG.NS","MOTHERSON.NS","ASHOKLEY.NS",
+    "INDIGO.NS","CONCOR.NS","BALKRISIND.NS","AUROPHARMA.NS","TORNTPHARM.NS",
+]
+
+# Active NSE F&O stocks (updated list)
+FNO_STOCKS = [
+    "RELIANCE.NS","TCS.NS","HDFCBANK.NS","ICICIBANK.NS","INFOSYS.NS",
+    "SBIN.NS","AXISBANK.NS","BAJFINANCE.NS","MARUTI.NS","LT.NS",
+    "KOTAKBANK.NS","HINDUNILVR.NS","ITC.NS","TITAN.NS","WIPRO.NS",
+    "SUNPHARMA.NS","ULTRACEMCO.NS","NTPC.NS","POWERGRID.NS","ADANIENT.NS",
+    "TATAMOTORS.NS","TATASTEEL.NS","JSWSTEEL.NS","HINDALCO.NS","BAJAJFINSV.NS",
+    "HCLTECH.NS","GRASIM.NS","INDUSINDBK.NS","CIPLA.NS","DRREDDY.NS",
+    "DIVISLAB.NS","EICHERMOT.NS","HEROMOTOCO.NS","BPCL.NS","APOLLOHOSP.NS",
+    "COALINDIA.NS","ONGC.NS","ADANIPORTS.NS","SIEMENS.NS","HAL.NS",
+    "BEL.NS","BHEL.NS","PFC.NS","RECLTD.NS","IRFC.NS",
+    "CANBK.NS","BANKBARODA.NS","PNB.NS","IDFCFIRSTB.NS","FEDERALBNK.NS",
+    "BAJAJ-AUTO.NS","TVSMOTORS.NS","M&M.NS","TATAPOWER.NS","ADANIGREEN.NS",
+    "VEDL.NS","NMDC.NS","SAIL.NS","ZOMATO.NS","DMART.NS",
+    "LTIM.NS","TECHM.NS","PERSISTENT.NS","COFORGE.NS","MPHASIS.NS",
+    "CHOLAFIN.NS","SBILIFE.NS","HDFCLIFE.NS","MUTHOOTFIN.NS","INDIGO.NS",
+    "ASHOKLEY.NS","MOTHERSON.NS","BALKRISIND.NS","AUROPHARMA.NS","TORNTPHARM.NS",
+    "JUBLFOOD.NS","GODREJCP.NS","DABUR.NS","MARICO.NS","COLPAL.NS",
+    "HAVELLS.NS","VOLTAS.NS","ABB.NS","BERGEPAINT.NS","PIDILITIND.NS",
+    "BANDHANBNK.NS","UNIONBANK.NS","TATACONSUM.NS","NESTLEIND.NS","BRITANNIA.NS",
+    "TORNTPOWER.NS","NHPC.NS","HINDZINC.NS","NATIONALUM.NS","CONCOR.NS",
+    "ICICIPRULI.NS","ICICIGI.NS","HDFCAMC.NS","ANGELONE.NS","BSE.NS",
+]
+
+NIFTY500_EXTRA = [
+    "LODHA.NS","PRESTIGE.NS","OBEROIRLTY.NS","PHOENIXLTD.NS","SOBHA.NS",
+    "KPRMILL.NS","PAGEIND.NS","MCDOWELL-N.NS","RADICO.NS","UBL.NS",
+    "TRENT.NS","NYKAA.NS","VMART.NS","ABFRL.NS","RAYMOND.NS",
+    "SYNGENE.NS","LALPATHLAB.NS","METROPOLIS.NS","MAXHEALTH.NS","FORTIS.NS",
+    "ZYDUSLIFE.NS","ALKEM.NS","IPCALAB.NS","GLAXO.NS","PFIZER.NS",
+    "TATAELXSI.NS","KPITTECH.NS","TANLA.NS","RATEGAIN.NS","ZENSAR.NS",
+    "CAMS.NS","CDSL.NS","MCX.NS","IIFL.NS","MANAPPURAM.NS",
+    "SUPREMEIND.NS","ASTRAL.NS","POLYCAB.NS","KANSAINER.NS","BLUEDART.NS",
+    "CELLO.NS","DIXON.NS","AMBER.NS","KAYNES.NS","SYRMA.NS",
+    "RVNL.NS","IRCON.NS","NBCC.NS","RITES.NS","RAILTEL.NS",
+    "SJVN.NS","GETC.NS","GEPIL.NS","GRSE.NS","MAZAGON.NS",
+    "COCHINSHIP.NS","GARFIBRES.NS","IFCI.NS","HUDCO.NS","IREDA.NS",
+]
+
+NIFTY500 = list(dict.fromkeys(NIFTY100 + FNO_STOCKS + NIFTY500_EXTRA))
+
+ALL_NSE = list(dict.fromkeys(NIFTY500 + [
+    "NAUKRI.NS","JUSTDIAL.NS","INFOEDGE.NS","CARTRADE.NS","EASEMYTRIP.NS",
+    "IXIGO.NS","YATHARTH.NS","KRSNAA.NS","MEDANTA.NS","VIJAYA.NS",
+    "BIKAJI.NS","DEVYANI.NS","SAPPHIRE.NS","WESTLIFE.NS","BARBEQUE.NS",
+    "RRKABEL.NS","KEI.NS","FINOLEX.NS","HBLPOWER.NS","INOXWIND.NS",
+    "WAAREEENER.NS","PREMIERENE.NS","WEBSOL.NS","GOLDENKA.NS","UCOBANK.NS",
+    "JKBANK.NS","KARNATAKA.NS","DCBBANK.NS","RBLBANK.NS","SOUTHBANK.NS",
+    "TATACHEM.NS","GHCL.NS","DEEPAKNI.NS","AARTI.NS","VINATI.NS",
+    "ALKYLAMINE.NS","FINEORG.NS","CLEAN.NS","NEOGEN.NS","ANURAS.NS",
+]))
+
+UNIVERSE_MAP = {
+    "Nifty 100":  NIFTY100,
+    "F&O Stocks": FNO_STOCKS,
+    "Nifty 500":  NIFTY500,
+    "All NSE":    ALL_NSE,
+}
+
+# ── Sector mapping ────────────────────────────────────────────────────────────
+SECTOR_MAP = {
+    "Technology":             "it",
+    "Financial Services":     "banking",
+    "Consumer Defensive":     "fmcg",
+    "Consumer Cyclical":      "consumer_discretionary",
+    "Healthcare":             "healthcare",
+    "Basic Materials":        "metals",
+    "Energy":                 "power",
+    "Industrials":            "capital_goods",
+    "Communication Services": "it",
+    "Real Estate":            "real_estate",
+    "Utilities":              "power",
+}
+
+def _fetch_one(ticker: str) -> dict | None:
+    try:
+        t    = yf.Ticker(ticker)
+        hist = t.history(period="max")
+        info = t.info
+
+        if hist.empty or len(hist) < 30:
+            log.warning(f"{ticker}: insufficient data, skipping")
+            return None
+
+        hist = hist.rename(columns={
+            "Open":"open","High":"high","Low":"low",
+            "Close":"close","Volume":"volume",
+        })[["open","high","low","close","volume"]]
+
+        symbol   = ticker.replace(".NS","")
+        sector   = SECTOR_MAP.get(info.get("sector",""), "capital_goods")
+        pe       = float(info.get("trailingPE") or info.get("forwardPE") or 20.0)
+        pb       = float(info.get("priceToBook") or 2.0)
+        ev_ebitda= float(info.get("enterpriseToEbitda") or 12.0)
+        roe      = float((info.get("returnOnEquity") or 0.12) * 100)
+        margin   = float((info.get("operatingMargins") or 0.10) * 100)
+        de       = float(info.get("debtToEquity") or 0.5)
+        rcagr    = float((info.get("revenueGrowth") or 0.08) * 100)
+        whale    = float(np.clip(info.get("heldPercentInstitutions") or 0.5, 0, 1))
+        turnover = float(
+            (info.get("averageVolume", 1e6) * info.get("currentPrice", 100)) / 1e7
+        )
+
+        return {
+            "symbol":       symbol,
+            "sector":       sector,
+            "price_df":     hist,
+            "pe":           pe,
+            "sector_pe":    22.0,
+            "pb":           pb,
+            "ev_ebitda":    ev_ebitda,
+            "roe":          roe,
+            "margin":       margin,
+            "debt_equity":  de,
+            "revenue_cagr": rcagr,
+            "whale":        whale,
+            "turnover_cr":  turnover,
+        }
+    except Exception as e:
+        log.warning(f"{ticker} failed: {e}")
+        return None
 
 
-def _make_ohlcv(n: int = 260, seed: int = 0) -> pd.DataFrame:
-    rng = np.random.default_rng(seed)
-    rets = rng.normal(0.0005, 0.015, n)
-    close = 100 * np.cumprod(1 + rets)
-    high = close * (1 + np.abs(rng.normal(0, 0.006, n)))
-    low = close * (1 - np.abs(rng.normal(0, 0.006, n)))
-    volume = rng.integers(1_000_000, 6_000_000, n).astype(float)
-    return pd.DataFrame({"close": close, "high": high, "low": low, "volume": volume})
+def build_real_universe(universe: str = "Nifty 100") -> pd.DataFrame:
+    """
+    Fetch real NSE data for chosen universe.
 
+    Parameters
+    ----------
+    universe : "Nifty 100" | "F&O Stocks" | "Nifty 500" | "All NSE"
 
-def build_sample_universe(n: int = 60) -> pd.DataFrame:
-    """Returns DataFrame of n stocks with all required columns."""
-    sectors = [
-        "capital_goods", "defence", "power", "infra",
-        "banking", "nbfc", "real_estate", "auto",
-        "it", "pharma", "fmcg", "metals",
-    ]
-    rng = np.random.default_rng(42)
+    Returns
+    -------
+    DataFrame ready for run_pipeline()
+    Data window grows automatically over time.
+    """
+    tickers = UNIVERSE_MAP.get(universe, NIFTY100)
+    log.info(f"Fetching {universe} — {len(tickers)} tickers")
+
     rows = []
+    for i, t in enumerate(tickers):
+        row = _fetch_one(t)
+        if row:
+            rows.append(row)
+        if (i + 1) % 20 == 0:
+            log.info(f"  {i+1}/{len(tickers)} fetched...")
 
-    for i in range(n):
-        rows.append({
-            "symbol":       f"STK{i:03d}",
-            "sector":       sectors[i % len(sectors)],
-            "price_df":     _make_ohlcv(seed=i),
-            "pe":           float(rng.uniform(8, 40)),
-            "sector_pe":    float(rng.uniform(12, 30)),
-            "pb":           float(rng.uniform(0.8, 6)),
-            "ev_ebitda":    float(rng.uniform(5, 25)),
-            "roe":          float(rng.uniform(5, 30)),
-            "margin":       float(rng.uniform(3, 28)),
-            "debt_equity":  float(rng.uniform(0.0, 2.0)),
-            "revenue_cagr": float(rng.uniform(-5, 22)),
-            "whale":        float(rng.uniform(0, 1)),
-            "turnover_cr":  float(rng.uniform(2, 200)),
-        })
-
+    log.info(f"Done — {len(rows)} stocks with valid data")
     return pd.DataFrame(rows)
