@@ -1,6 +1,6 @@
 """
 WhaleWatch Alpha — Streamlit Dashboard
-Run: streamlit run app_streamlit.py
+Real NSE data | 4 Universe Toggles | 7-Factor Ranking
 """
 import streamlit as st
 import pandas as pd
@@ -8,28 +8,39 @@ import plotly.express as px
 import plotly.graph_objects as go
 import sys
 from pathlib import Path
+from datetime import date
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.data.universe_builder import build_sample_universe
+from src.data.universe_builder import build_real_universe, UNIVERSE_MAP
 from src.pipeline.daily_alpha_pipeline import run_pipeline
 
-# ── Page config ───────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="WhaleWatch Alpha",
-    page_icon="🐋",
-    layout="wide",
-)
+st.set_page_config(page_title="WhaleWatch Alpha", page_icon="🐋", layout="wide")
 
-# ── Header ────────────────────────────────────────────────────────────────────
 st.title("🐋 WhaleWatch Alpha")
-st.caption("NSE Multi-Factor Daily Stock Ranking Engine")
+st.caption(f"NSE Multi-Factor Daily Stock Ranking Engine  •  {date.today().strftime('%d %b %Y')}")
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ Settings")
-    top_n = st.slider("Top N Stocks", min_value=5, max_value=20, value=10, step=1)
-    universe_size = st.slider("Universe Size (sample)", min_value=20, max_value=200, value=60, step=10)
+
+    universe = st.radio(
+        "📊 Stock Universe",
+        options=list(UNIVERSE_MAP.keys()),
+        index=0,
+        help="Nifty 100 = fastest | All NSE = most comprehensive",
+    )
+
+    universe_sizes = {
+        "Nifty 100":  "~100 stocks • ~1 min",
+        "F&O Stocks": "~90 stocks  • ~1 min",
+        "Nifty 500":  "~250 stocks • ~3 min",
+        "All NSE":    "~300+ stocks • ~4 min",
+    }
+    st.caption(universe_sizes.get(universe, ""))
+
+    top_n = st.slider("Top N Stocks", 5, 20, 10)
+
     st.divider()
     st.markdown("**Factor Weights**")
     st.markdown("""
@@ -47,108 +58,145 @@ with st.sidebar:
 
 # ── Session state ─────────────────────────────────────────────────────────────
 if "results" not in st.session_state:
-    st.session_state.results = None
+    st.session_state.results   = None
+    st.session_state.universe  = None
+    st.session_state.hist_data = {}
 
 # ── Run pipeline ──────────────────────────────────────────────────────────────
 if run_btn or st.session_state.results is None:
-    with st.spinner("Running 7-factor alpha pipeline..."):
-        universe_df = build_sample_universe(n=universe_size)
+    with st.spinner(f"📡 Fetching {universe} data from Yahoo Finance..."):
+        universe_df = build_real_universe(universe=universe)
+
+    if universe_df.empty:
+        st.error("No data fetched. Check your internet connection and try again.")
+        st.stop()
+
+    with st.spinner("⚙️ Running 7-factor alpha pipeline..."):
         results = run_pipeline(universe_df, top_n=top_n)
-        st.session_state.results = results
-    st.success(f"✅ Pipeline complete — Top {top_n} stocks ranked")
+        st.session_state.hist_data = {
+            row["symbol"]: universe_df[
+                universe_df["symbol"] == row["symbol"]
+            ]["price_df"].values[0]
+            for _, row in results.iterrows()
+            if row["symbol"] in universe_df["symbol"].values
+        }
+        st.session_state.results  = results
+        st.session_state.universe = universe
+
+    days = max(
+        [len(v) for v in st.session_state.hist_data.values() if v is not None],
+        default=0,
+    )
+    st.success(
+        f"✅ {universe} pipeline complete — "
+        f"{len(universe_df)} stocks scanned | "
+        f"Top {top_n} ranked | "
+        f"📅 {days} trading days of history"
+    )
 
 df = st.session_state.results
+if df is None or df.empty:
+    st.info("👈 Click **Run Pipeline** in the sidebar to start.")
+    st.stop()
 
 # ── KPI row ───────────────────────────────────────────────────────────────────
 st.divider()
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Top Stock",   df["symbol"].iloc[0])
-col2.metric("Best Score",  f"{df['final_score'].iloc[0]:.4f}")
-col3.metric("Avg Score",   f"{df['final_score'].mean():.4f}")
-col4.metric("Stocks Ranked", len(df))
-
+c1,c2,c3,c4 = st.columns(4)
+c1.metric("🏆 Top Stock",     df["symbol"].iloc[0])
+c2.metric("⭐ Best Score",    f"{df['final_score'].iloc[0]:.4f}")
+c3.metric("📊 Avg Score",     f"{df['final_score'].mean():.4f}")
+c4.metric("🔭 Universe",      st.session_state.universe or universe)
 st.divider()
 
-# ── Main table ────────────────────────────────────────────────────────────────
+# ── Table ─────────────────────────────────────────────────────────────────────
 st.subheader("📋 Top Alpha Stocks")
-
 score_cols = ["final_score","technical","valuation","moat","quant","macro","risk","whale"]
 display_df = df.copy()
 for c in score_cols:
     if c in display_df.columns:
         display_df[c] = display_df[c].apply(lambda x: round(float(x), 4))
 
-# Simple clean table — no matplotlib dependency
 st.dataframe(display_df, use_container_width=True, height=420)
 
-# ── Download button ───────────────────────────────────────────────────────────
 csv_data = display_df.to_csv(index=False).encode("utf-8")
-st.download_button(
-    label="📥 Download CSV",
-    data=csv_data,
-    file_name="alpha_top10.csv",
-    mime="text/csv",
-)
+st.download_button("📥 Download CSV", csv_data, "alpha_top10.csv", "text/csv")
 
 st.divider()
 
-# ── Charts ────────────────────────────────────────────────────────────────────
-col_left, col_right = st.columns(2)
+# ── Bar + Radar ───────────────────────────────────────────────────────────────
+cl, cr = st.columns(2)
 
-with col_left:
+with cl:
     st.subheader("🎯 Final Alpha Score")
     fig_bar = px.bar(
         df.sort_values("final_score"),
-        x="final_score",
-        y="symbol",
-        orientation="h",
-        color="final_score",
-        color_continuous_scale="Teal",
-        labels={"final_score": "Alpha Score", "symbol": "Stock"},
+        x="final_score", y="symbol", orientation="h",
+        color="final_score", color_continuous_scale="Teal",
+        labels={"final_score":"Alpha Score","symbol":"Stock"},
     )
-    fig_bar.update_layout(
-        showlegend=False,
-        coloraxis_showscale=False,
-        height=420,
-        margin=dict(l=10, r=10, t=10, b=10),
-    )
+    fig_bar.update_layout(showlegend=False, coloraxis_showscale=False,
+                          height=420, margin=dict(l=10,r=10,t=10,b=10))
     st.plotly_chart(fig_bar, use_container_width=True)
 
-with col_right:
+with cr:
     st.subheader("📡 Factor Breakdown — Top Stock")
-    top_stock  = df.iloc[0]
-    factor_cols = [c for c in ["technical","valuation","moat","quant","macro","whale"] if c in df.columns]
-    factor_vals = [float(top_stock[c]) for c in factor_cols]
-
+    top_stock = df.iloc[0]
+    fcols     = [c for c in ["technical","valuation","moat","quant","macro","whale"] if c in df.columns]
+    fvals     = [float(top_stock[c]) for c in fcols]
     fig_radar = go.Figure(go.Scatterpolar(
-        r=factor_vals + [factor_vals[0]],
-        theta=factor_cols + [factor_cols[0]],
-        fill="toself",
-        fillcolor="rgba(0,180,180,0.2)",
+        r=fvals+[fvals[0]], theta=fcols+[fcols[0]],
+        fill="toself", fillcolor="rgba(0,180,180,0.2)",
         line=dict(color="teal", width=2),
     ))
     fig_radar.update_layout(
-        polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-        showlegend=False,
-        height=420,
-        margin=dict(l=40, r=40, t=40, b=40),
+        polar=dict(radialaxis=dict(visible=True, range=[0,1])),
+        showlegend=False, height=420, margin=dict(l=40,r=40,t=40,b=40),
     )
     st.plotly_chart(fig_radar, use_container_width=True)
 
+# ── Price history ─────────────────────────────────────────────────────────────
+st.divider()
+st.subheader("📈 Price History — Top 10 Stocks (Indexed, Base = 100)")
+
+hist_data = st.session_state.hist_data
+if hist_data:
+    fig_hist = go.Figure()
+    for symbol, price_df in hist_data.items():
+        if price_df is not None and len(price_df) >= 5:
+            pdf   = price_df.copy().reset_index()
+            pdf["norm"] = pdf["close"] / pdf["close"].iloc[0] * 100
+            xcol  = "Date" if "Date" in pdf.columns else pdf.columns[0]
+            fig_hist.add_trace(go.Scatter(
+                x=pdf[xcol], y=pdf["norm"],
+                mode="lines", name=symbol, line=dict(width=1.8),
+                hovertemplate="%{y:.1f}<extra>%{fullData.name}</extra>",
+            ))
+    fig_hist.update_layout(
+        height=460,
+        xaxis_title="Date",
+        yaxis_title="Indexed Price (Base=100)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        margin=dict(l=10,r=10,t=40,b=10),
+        hovermode="x unified",
+    )
+    st.plotly_chart(fig_hist, use_container_width=True)
+
+    days = max([len(v) for v in hist_data.values() if v is not None], default=0)
+    st.caption(
+        f"📅 {days} trading days available today. "
+        "Data window grows automatically — more history every day."
+    )
+
 # ── Heatmap ───────────────────────────────────────────────────────────────────
 st.divider()
-st.subheader("🔥 Factor Heatmap — All Stocks")
-heat_cols = [c for c in ["technical","valuation","moat","quant","macro","whale"] if c in df.columns]
-heat_df   = df[["symbol"] + heat_cols].set_index("symbol").astype(float)
-
+st.subheader("🔥 Factor Heatmap — All Ranked Stocks")
+hcols   = [c for c in ["technical","valuation","moat","quant","macro","whale"] if c in df.columns]
+heat_df = df[["symbol"]+hcols].set_index("symbol").astype(float)
 fig_heat = px.imshow(
-    heat_df,
-    color_continuous_scale="RdYlGn",
-    aspect="auto",
-    labels=dict(x="Factor", y="Stock", color="Score"),
-    zmin=0, zmax=1,
+    heat_df, color_continuous_scale="RdYlGn", aspect="auto",
+    labels=dict(x="Factor",y="Stock",color="Score"), zmin=0, zmax=1,
 )
-fig_heat.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10))
+fig_heat.update_layout(height=420, margin=dict(l=10,r=10,t=10,b=10))
 st.plotly_chart(fig_heat, use_container_width=True)
 
-st.caption("WhaleWatch Alpha — Sample data. Replace universe_builder.py with real NSE data.")
+st.caption("WhaleWatch Alpha | Data: Yahoo Finance NSE | Refresh daily for latest rankings")
