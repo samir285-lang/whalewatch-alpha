@@ -12,7 +12,7 @@ from datetime import date
 
 st.set_page_config(page_title="WhaleWatch Alpha", page_icon="🐋", layout="wide")
 
-OUTPUT_DIR = Path("output")
+OUTPUT_DIR = Path(__file__).parent / "output"
 
 UNIVERSE_FILES = {
     "🔵 Nifty 100":  "nifty_100_top15.csv",
