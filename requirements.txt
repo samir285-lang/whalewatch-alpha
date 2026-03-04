@@ -4,3 +4,4 @@ pytest
 streamlit
 plotly
 yfinance
+pytz
