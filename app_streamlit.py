@@ -13,16 +13,15 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from src.data.universe_builder import build_sample_universe
 from src.pipeline.daily_alpha_pipeline import run_pipeline
-from src.pipeline.output_formatter import export_csv
 
-# ── Page config ─────────────────────────────────────────────────────────────
+# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="WhaleWatch Alpha",
     page_icon="🐋",
     layout="wide",
 )
 
-# ── Header ───────────────────────────────────────────────────────────────────
+# ── Header ────────────────────────────────────────────────────────────────────
 st.title("🐋 WhaleWatch Alpha")
 st.caption("NSE Multi-Factor Daily Stock Ranking Engine")
 
@@ -34,15 +33,15 @@ with st.sidebar:
     st.divider()
     st.markdown("**Factor Weights**")
     st.markdown("""
-    | Factor | Weight |
-    |--------|--------|
-    | Technical | 25% |
-    | Valuation | 20% |
-    | Moat | 15% |
-    | Quant | 15% |
-    | Macro | 10% |
-    | Risk (inv) | 10% |
-    | Whale | 5% |
+| Factor | Weight |
+|--------|--------|
+| Technical | 25% |
+| Valuation | 20% |
+| Moat | 15% |
+| Quant | 15% |
+| Macro | 10% |
+| Risk (inv) | 10% |
+| Whale | 5% |
     """)
     run_btn = st.button("🔄 Run Pipeline", use_container_width=True, type="primary")
 
@@ -50,7 +49,7 @@ with st.sidebar:
 if "results" not in st.session_state:
     st.session_state.results = None
 
-# ── Run pipeline ─────────────────────────────────────────────────────────────
+# ── Run pipeline ──────────────────────────────────────────────────────────────
 if run_btn or st.session_state.results is None:
     with st.spinner("Running 7-factor alpha pipeline..."):
         universe_df = build_sample_universe(n=universe_size)
@@ -60,33 +59,27 @@ if run_btn or st.session_state.results is None:
 
 df = st.session_state.results
 
-# ── KPI row ──────────────────────────────────────────────────────────────────
+# ── KPI row ───────────────────────────────────────────────────────────────────
 st.divider()
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Top Stock", df["symbol"].iloc[0])
-col2.metric("Best Score", f"{df['final_score'].iloc[0]:.4f}")
-col3.metric("Avg Score", f"{df['final_score'].mean():.4f}")
+col1.metric("Top Stock",   df["symbol"].iloc[0])
+col2.metric("Best Score",  f"{df['final_score'].iloc[0]:.4f}")
+col3.metric("Avg Score",   f"{df['final_score'].mean():.4f}")
 col4.metric("Stocks Ranked", len(df))
 
 st.divider()
 
-# ── Main table ───────────────────────────────────────────────────────────────
+# ── Main table ────────────────────────────────────────────────────────────────
 st.subheader("📋 Top Alpha Stocks")
 
+score_cols = ["final_score","technical","valuation","moat","quant","macro","risk","whale"]
 display_df = df.copy()
-score_cols = ["final_score", "technical", "valuation", "moat", "quant", "macro", "risk", "whale"]
 for c in score_cols:
     if c in display_df.columns:
         display_df[c] = display_df[c].apply(lambda x: round(float(x), 4))
 
-st.dataframe(
-    display_df.style.background_gradient(subset=["final_score"], cmap="Greens")
-               .background_gradient(subset=["technical"], cmap="Blues")
-               .background_gradient(subset=["valuation"], cmap="Oranges")
-               .format({c: "{:.4f}" for c in score_cols if c in display_df.columns}),
-    use_container_width=True,
-    height=420,
-)
+# Simple clean table — no matplotlib dependency
+st.dataframe(display_df, use_container_width=True, height=420)
 
 # ── Download button ───────────────────────────────────────────────────────────
 csv_data = display_df.to_csv(index=False).encode("utf-8")
@@ -99,7 +92,7 @@ st.download_button(
 
 st.divider()
 
-# ── Charts row ───────────────────────────────────────────────────────────────
+# ── Charts ────────────────────────────────────────────────────────────────────
 col_left, col_right = st.columns(2)
 
 with col_left:
@@ -123,18 +116,16 @@ with col_left:
 
 with col_right:
     st.subheader("📡 Factor Breakdown — Top Stock")
-    top_stock = df.iloc[0]
-    factor_cols = ["technical", "valuation", "moat", "quant", "macro", "whale"]
-    factor_cols = [c for c in factor_cols if c in df.columns]
+    top_stock  = df.iloc[0]
+    factor_cols = [c for c in ["technical","valuation","moat","quant","macro","whale"] if c in df.columns]
     factor_vals = [float(top_stock[c]) for c in factor_cols]
 
     fig_radar = go.Figure(go.Scatterpolar(
         r=factor_vals + [factor_vals[0]],
         theta=factor_cols + [factor_cols[0]],
         fill="toself",
-        fillcolor="rgba(0, 180, 180, 0.2)",
+        fillcolor="rgba(0,180,180,0.2)",
         line=dict(color="teal", width=2),
-        name=top_stock["symbol"],
     ))
     fig_radar.update_layout(
         polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
@@ -144,21 +135,20 @@ with col_right:
     )
     st.plotly_chart(fig_radar, use_container_width=True)
 
-# ── Factor heatmap ────────────────────────────────────────────────────────────
+# ── Heatmap ───────────────────────────────────────────────────────────────────
 st.divider()
 st.subheader("🔥 Factor Heatmap — All Stocks")
-heat_cols = ["technical", "valuation", "moat", "quant", "macro", "whale"]
-heat_cols = [c for c in heat_cols if c in df.columns]
-heat_df = df[["symbol"] + heat_cols].set_index("symbol")
+heat_cols = [c for c in ["technical","valuation","moat","quant","macro","whale"] if c in df.columns]
+heat_df   = df[["symbol"] + heat_cols].set_index("symbol").astype(float)
 
 fig_heat = px.imshow(
-    heat_df.astype(float),
+    heat_df,
     color_continuous_scale="RdYlGn",
     aspect="auto",
     labels=dict(x="Factor", y="Stock", color="Score"),
     zmin=0, zmax=1,
 )
-fig_heat.update_layout(height=400, margin=dict(l=10, r=10, t=10, b=10))
+fig_heat.update_layout(height=420, margin=dict(l=10, r=10, t=10, b=10))
 st.plotly_chart(fig_heat, use_container_width=True)
 
-st.caption("WhaleWatch Alpha — Sample data. Replace universe_builder.py with real NSE data source.")
+st.caption("WhaleWatch Alpha — Sample data. Replace universe_builder.py with real NSE data.")
